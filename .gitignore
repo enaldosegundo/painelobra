@@ -1,0 +1,3 @@
+# Ignorar credenciais do Google Cloud
+painelobra-*.json
+*.json
