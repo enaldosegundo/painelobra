@@ -7,16 +7,23 @@ import requests
 import gspread
 import os
 import json
-from oauth2client.service_account import ServiceAccountCredentials
 import gspread
+from oauth2client.service_account import ServiceAccountCredentials
 
-# Carregar credenciais do JSON armazenado na variável de ambiente
-credenciais_json = json.loads(os.environ["GOOGLE_CREDENTIALS"])
+# ✅ Carregar credenciais diretamente da variável de ambiente do Render
+try:
+    credenciais_json = json.loads(os.environ["GOOGLE_CREDENTIALS"])
 
-# Configurar autenticação
-scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-creds = ServiceAccountCredentials.from_json_keyfile_dict(credenciais_json, scope)
-client = gspread.authorize(creds)
+    # ✅ Configurar autenticação com o Google Sheets
+    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(credenciais_json, scope)
+    client = gspread.authorize(creds)
+
+    print("✅ Conexão com Google Sheets estabelecida com sucesso!")
+except KeyError:
+    print("❌ ERRO: Variável de ambiente 'GOOGLE_CREDENTIALS' não encontrada!")
+except Exception as e:
+    print(f"❌ Erro ao carregar dados do Google Sheets: {e}")
 
 # API do OpenWeatherMap
 API_KEY = "034f2255b5ce05778c180823514a93fb"  # Substitua pela sua chave da API
