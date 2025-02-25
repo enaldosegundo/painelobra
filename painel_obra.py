@@ -5,15 +5,18 @@ from dash.dependencies import Input, Output
 import datetime
 import requests
 import gspread
-from oauth2client.service_account import ServiceAccountCredentials
 import os
+import json
+from oauth2client.service_account import ServiceAccountCredentials
+import gspread
 
-# Caminho para o arquivo JSON de credenciais (suba para o servidor se estiver online)
-CREDENTIALS_FILE = "C:/Scripts Python/painelobra_online/painelobra-048bc64f706c.json"
+# Carregar credenciais do JSON armazenado na variável de ambiente
+credenciais_json = json.loads(os.environ["GOOGLE_CREDENTIALS"])
 
-# URL ou ID da sua planilha do Google Sheets
-SHEET_ID = "1x3YfPAut6jONtLzP0eITD0O4USV3Ils6VLhO3PTpOg8"  # Exemplo: 1KJH7g7G8k0Q7t8W9xAbCdEfGHIJKLMN
-SHEET_NAME = "painelobra"  # Nome da aba dentro da planilha
+# Configurar autenticação
+scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+creds = ServiceAccountCredentials.from_json_keyfile_dict(credenciais_json, scope)
+client = gspread.authorize(creds)
 
 # API do OpenWeatherMap
 API_KEY = "034f2255b5ce05778c180823514a93fb"  # Substitua pela sua chave da API
