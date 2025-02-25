@@ -10,7 +10,7 @@ import json
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 
-# ✅ Carregar credenciais diretamente da variável de ambiente do Render
+# ✅ Carregar credenciais do JSON armazenado na variável de ambiente do Render
 try:
     credenciais_json = json.loads(os.environ["GOOGLE_CREDENTIALS"])
 
@@ -19,9 +19,17 @@ try:
     creds = ServiceAccountCredentials.from_json_keyfile_dict(credenciais_json, scope)
     client = gspread.authorize(creds)
 
-    print("✅ Conexão com Google Sheets estabelecida com sucesso!")
+    # ✅ Definir o ID da planilha (adicione o ID real da sua planilha aqui!)
+    SHEET_ID = os.environ.get("SHEET_ID", "1x3YfPAut6jONtLzP0eITD0O4USV3Ils6VLhO3PTpOg8")
+    SHEET_NAME = "painelobra"  # Nome da aba da planilha
+
+    # ✅ Abrir a planilha e carregar os dados
+    sheet = client.open_by_key(SHEET_ID).worksheet(SHEET_NAME)
+    dados = sheet.get_all_records()
+
+    print("✅ Dados carregados do Google Sheets com sucesso!")
 except KeyError:
-    print("❌ ERRO: Variável de ambiente 'GOOGLE_CREDENTIALS' não encontrada!")
+    print("❌ ERRO: Variáveis de ambiente não encontradas! Verifique GOOGLE_CREDENTIALS e SHEET_ID.")
 except Exception as e:
     print(f"❌ Erro ao carregar dados do Google Sheets: {e}")
 
