@@ -372,16 +372,9 @@ def reload_data(n_clicks):
         return "Dados recarregados"
     return "Tentar novamente"
 
-# Criar o aplicativo Dash
-app = dash.Dash(__name__)
-server = app.server  # Gunicorn precisa deste objeto para rodar a aplicação
-
-# Definir o layout do app
-app.layout = html.Div([
-    html.H1("Painel de Controle da Obra"),
-    html.P("Este é um exemplo básico de um painel Dash rodando no Render com Gunicorn."),
-])
+# Configurando layout do app
+app.layout = layout()
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8050))  # Render define a porta automaticamente
-    app.run_server(host="0.0.0.0", port=port)
+    port = int(os.environ.get("PORT", 8050))
+    app.run_server(host="0.0.0.0", port=port, debug=False)  # Debug False para produção
