@@ -207,6 +207,16 @@ def atualizar_previsao(municipios_selecionados):
         ]) for cidade, dados in previsoes.items()
     ])
 
+from geopy.geocoders import Nominatim
+
+def obter_coordenadas(municipio, uf):
+    """Obtém as coordenadas geográficas do município e estado."""
+    geolocator = Nominatim(user_agent="painel_obra")
+    localizacao = geolocator.geocode(f"{municipio}, {uf}, Brasil")
+    if localizacao:
+        return localizacao.latitude
+    return None
+
 @app.callback(
     Output("quadro_canteiros", "children"),
     [Input("filtro_disciplina", "value"), 
@@ -227,6 +237,10 @@ def atualizar_quadro(filtro_disciplina, filtro_local, filtro_empreiteira):
     if filtro_empreiteira:
         df_filtrado = df_filtrado[df_filtrado["Empreiteira"].isin(filtro_empreiteira)]
     
+        # Obter coordenadas dos municípios e ordenar de Norte para Sul
+    df_filtrado["Latitude"] = df_filtrado.apply(lambda row: obter_coordenadas(row["Município"], row["UF"]), axis=1)
+    df_filtrado = df_filtrado.sort_values(by="Latitude", ascending=False)  # Ordenar do maior para o menor (Norte → Sul)
+
     canteiros = df_filtrado["Local Atual"].unique()
     cards = []
     
