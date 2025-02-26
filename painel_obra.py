@@ -9,6 +9,16 @@ import os
 import json
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
+import os
+import subprocess
+
+# Instala o geopy caso não esteja instalado
+try:
+    from geopy.geocoders import Nominatim
+except ModuleNotFoundError:
+    print("📌 geopy não encontrado! Instalando...")
+    subprocess.check_call(["pip", "install", "geopy"])
+    from geopy.geocoders import Nominatim
 
 # ✅ Carregar credenciais do JSON armazenado na variável de ambiente do Render
 try:
