@@ -372,6 +372,10 @@ def reload_data(n_clicks):
         return "Dados recarregados"
     return "Tentar novamente"
 
+# Criar o aplicativo Dash
+app = dash.Dash(__name__)
+server = app.server  # Gunicorn precisa deste objeto para rodar a aplicação
+
 # Configurando layout do app
 app.layout = layout()
 
