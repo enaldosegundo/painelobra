@@ -4,47 +4,24 @@ from dash import dcc, html, dash_table
 from dash.dependencies import Input, Output
 import datetime
 import requests
-import gspread
-import os
 import json
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
 import os
 import subprocess
 
-# Instala o geopy caso não esteja instalado
+# Instala as dependências caso não estejam instaladas
 try:
+    import gspread
+    from oauth2client.service_account import ServiceAccountCredentials
     from geopy.geocoders import Nominatim
 except ModuleNotFoundError:
-    print("📌 geopy não encontrado! Instalando...")
-    subprocess.check_call(["pip", "install", "geopy"])
+    print("📌 Instalando dependências...")
+    subprocess.check_call(["pip", "install", "gspread", "oauth2client", "geopy"])
+    import gspread
+    from oauth2client.service_account import ServiceAccountCredentials
     from geopy.geocoders import Nominatim
 
-# ✅ Carregar credenciais do JSON armazenado na variável de ambiente do Render
-try:
-    credenciais_json = json.loads(os.environ["GOOGLE_CREDENTIALS"])
-
-    # ✅ Configurar autenticação com o Google Sheets
-    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-    creds = ServiceAccountCredentials.from_json_keyfile_dict(credenciais_json, scope)
-    client = gspread.authorize(creds)
-
-    # ✅ Definir o ID da planilha (adicione o ID real da sua planilha aqui!)
-    SHEET_ID = os.environ.get("SHEET_ID", "1x3YfPAut6jONtLzP0eITD0O4USV3Ils6VLhO3PTpOg8")
-    SHEET_NAME = "painelobra"  # Nome da aba da planilha
-
-    # ✅ Abrir a planilha e carregar os dados
-    sheet = client.open_by_key(SHEET_ID).worksheet(SHEET_NAME)
-    dados = sheet.get_all_records()
-
-    print("✅ Dados carregados do Google Sheets com sucesso!")
-except KeyError:
-    print("❌ ERRO: Variáveis de ambiente não encontradas! Verifique GOOGLE_CREDENTIALS e SHEET_ID.")
-except Exception as e:
-    print(f"❌ Erro ao carregar dados do Google Sheets: {e}")
-
 # API do OpenWeatherMap
-API_KEY = "034f2255b5ce05778c180823514a93fb"  # Substitua pela sua chave da API
+API_KEY = "034f2255b5ce05778c180823514a93fb"
 BASE_URL = "https://api.openweathermap.org/data/2.5/weather"
 
 # Lista inicial de municípios
@@ -70,22 +47,60 @@ cores_disciplinas = {
     "Qualidade": "#add8e6"
 }
 
+# Inicialização de variáveis globais
+client = None
+creds = None
+
+def inicializar_google_sheets():
+    """Inicializa a conexão com o Google Sheets"""
+    global client, creds
+    try:
+        credenciais_json = json.loads(os.environ["GOOGLE_CREDENTIALS"])
+        
+        # Configurar autenticação com o Google Sheets
+        scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(credenciais_json, scope)
+        client = gspread.authorize(creds)
+        
+        print("✅ Conexão com Google Sheets inicializada com sucesso!")
+        return True
+    except KeyError:
+        print("❌ ERRO: Variável de ambiente GOOGLE_CREDENTIALS não encontrada!")
+        return False
+    except Exception as e:
+        print(f"❌ Erro ao inicializar conexão com Google Sheets: {e}")
+        return False
+
 def carregar_dados():
     """Carrega os dados da planilha do Google Sheets"""
+    global client, creds
+    
     try:
-        # Configurar credenciais
-        scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-        client = gspread.authorize(creds)
-
+        # Verificar se o cliente já está inicializado
+        if client is None:
+            if not inicializar_google_sheets():
+                return pd.DataFrame()
+        
+        # Definir o ID da planilha
+        SHEET_ID = os.environ.get("SHEET_ID", "1x3YfPAut6jONtLzP0eITD0O4USV3Ils6VLhO3PTpOg8")
+        SHEET_NAME = "painelobra"  # Nome da aba da planilha
+        
         # Abrir a planilha e carregar os dados
         sheet = client.open_by_key(SHEET_ID).worksheet(SHEET_NAME)
         dados = sheet.get_all_records()  # Retorna os dados da planilha como dicionário
-
+        
         # Converter para DataFrame
-        return pd.DataFrame(dados)
+        df = pd.DataFrame(dados)
+        print(f"✅ Dados carregados com sucesso! {len(df)} registros encontrados.")
+        return df
+    except gspread.exceptions.APIError as e:
+        print(f"❌ Erro de API do Google Sheets: {e}")
+        # Tentar renovar as credenciais
+        if inicializar_google_sheets():
+            return carregar_dados()
+        return pd.DataFrame()
     except Exception as e:
-        print(f"Erro ao carregar dados do Google Sheets: {e}")
-        # Se falhar, tenta carregar dados de backup ou retorna um DataFrame vazio
+        print(f"❌ Erro ao carregar dados do Google Sheets: {e}")
         return pd.DataFrame()
 
 def obter_previsao(municipios):
@@ -122,8 +137,24 @@ def semana_atual():
     sabado = segunda + datetime.timedelta(days=5)
     return f"Semana {semana} - {segunda.strftime('%d/%m/%Y')} até {sabado.strftime('%d/%m/%Y')}"
 
+def obter_coordenadas(municipio, uf):
+    """Obtém as coordenadas geográficas do município e estado."""
+    try:
+        geolocator = Nominatim(user_agent="painel_obra")
+        localizacao = geolocator.geocode(f"{municipio}, {uf}, Brasil", timeout=10)
+        if localizacao:
+            return localizacao.latitude
+        return None
+    except Exception as e:
+        print(f"Erro ao obter coordenadas para {municipio}, {uf}: {e}")
+        return None
+
 # Criando o app Dash
-app = dash.Dash(__name__)
+app = dash.Dash(__name__, suppress_callback_exceptions=True)
+server = app.server  # Necessário para deploy em serviços como Render
+
+# Inicializa a conexão com o Google Sheets
+inicializar_google_sheets()
 
 def layout():
     """Função principal de layout"""
@@ -131,7 +162,11 @@ def layout():
     if df.empty:
         return html.Div([
             html.H1("Erro: Dados não disponíveis", 
-                   style={"color": "red", "textAlign": "center"})
+                   style={"color": "red", "textAlign": "center"}),
+            html.P("Verifique as variáveis de ambiente e a conexão com o Google Sheets.",
+                  style={"textAlign": "center"}),
+            html.Button("Tentar novamente", id="btn-reload", 
+                       style={"margin": "20px auto", "display": "block"})
         ])
     
     return html.Div([
@@ -191,6 +226,13 @@ def layout():
         # Quadro visual dos canteiros
         html.Div(id="quadro_canteiros", 
                  style={"display": "flex", "gap": "20px", "justifyContent": "center", "flexWrap": "wrap", "padding": "20px"}),
+        
+        # Interval para atualização automática dos dados (a cada 5 minutos)
+        dcc.Interval(
+            id='interval-component',
+            interval=300*1000,  # 5 minutos em milissegundos
+            n_intervals=0
+        )
     ])
 
 @app.callback(
@@ -217,23 +259,14 @@ def atualizar_previsao(municipios_selecionados):
         ]) for cidade, dados in previsoes.items()
     ])
 
-from geopy.geocoders import Nominatim
-
-def obter_coordenadas(municipio, uf):
-    """Obtém as coordenadas geográficas do município e estado."""
-    geolocator = Nominatim(user_agent="painel_obra")
-    localizacao = geolocator.geocode(f"{municipio}, {uf}, Brasil")
-    if localizacao:
-        return localizacao.latitude
-    return None
-
 @app.callback(
     Output("quadro_canteiros", "children"),
     [Input("filtro_disciplina", "value"), 
      Input("filtro_local", "value"), 
-     Input("filtro_empreiteira", "value")]
+     Input("filtro_empreiteira", "value"),
+     Input("interval-component", "n_intervals")]
 )
-def atualizar_quadro(filtro_disciplina, filtro_local, filtro_empreiteira):
+def atualizar_quadro(filtro_disciplina, filtro_local, filtro_empreiteira, n_intervals):
     """Callback para atualizar o quadro de canteiros"""
     df_filtrado = carregar_dados()
     
@@ -247,16 +280,31 @@ def atualizar_quadro(filtro_disciplina, filtro_local, filtro_empreiteira):
     if filtro_empreiteira:
         df_filtrado = df_filtrado[df_filtrado["Empreiteira"].isin(filtro_empreiteira)]
     
-        # Obter coordenadas dos municípios e ordenar de Norte para Sul
-    df_filtrado["Latitude"] = df_filtrado.apply(lambda row: obter_coordenadas(row["Município"], row["UF"]), axis=1)
-    df_filtrado = df_filtrado.sort_values(by="Latitude", ascending=False)  # Ordenar do maior para o menor (Norte → Sul)
-
+    # Obter coordenadas dos municípios e ordenar de Norte para Sul
+    # Verificar se já existem as colunas Município e UF
+    if "Município" in df_filtrado.columns and "UF" in df_filtrado.columns:
+        df_filtrado["Latitude"] = df_filtrado.apply(
+            lambda row: obter_coordenadas(row["Município"], row["UF"]) 
+            if pd.notna(row["Município"]) and pd.notna(row["UF"]) else None, 
+            axis=1
+        )
+        # Ordenamos apenas os valores que possuem latitude
+        if df_filtrado["Latitude"].notna().any():
+            df_com_lat = df_filtrado[df_filtrado["Latitude"].notna()].sort_values(by="Latitude", ascending=False)
+            df_sem_lat = df_filtrado[df_filtrado["Latitude"].isna()]
+            df_filtrado = pd.concat([df_com_lat, df_sem_lat])
+    
     canteiros = df_filtrado["Local Atual"].unique()
     cards = []
     
     for canteiro in canteiros:
         df_canteiro = df_filtrado[df_filtrado["Local Atual"] == canteiro]
-        empreiteira = df_canteiro["Empreiteira"].iloc[0] if not df_canteiro.empty else "Folga"
+        
+        # Verificar se há registros para este canteiro
+        if df_canteiro.empty:
+            continue
+            
+        empreiteira = df_canteiro["Empreiteira"].iloc[0] if not df_canteiro["Empreiteira"].isna().all() else "Folga"
         cor_canteiro = cores_canteiros.get(empreiteira, "#d3d3d3")
         
         background_style = {
@@ -302,7 +350,7 @@ def atualizar_quadro(filtro_disciplina, filtro_local, filtro_empreiteira):
                     "marginBottom": "5px",
                     "listStyleType": "none"
                 }
-            ) for _, row in df_canteiro.iterrows()
+            ) for _, row in df_canteiro.iterrows() if pd.notna(row['Nome']) and pd.notna(row['Disciplina'])
         ], style={"padding": "0", "margin": "0"})
         
         cards.append(html.Div([
@@ -313,9 +361,20 @@ def atualizar_quadro(filtro_disciplina, filtro_local, filtro_empreiteira):
     
     return cards
 
+@app.callback(
+    Output("btn-reload", "children"),
+    [Input("btn-reload", "n_clicks")]
+)
+def reload_data(n_clicks):
+    """Callback para recarregar os dados quando o botão for clicado"""
+    if n_clicks:
+        inicializar_google_sheets()
+        return "Dados recarregados"
+    return "Tentar novamente"
+
 # Configurando layout do app
 app.layout = layout()
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8050))  # Define a porta correta
-    app.run_server(host="0.0.0.0", port=port, debug=True)
+    port = int(os.environ.get("PORT", 8050))
+    app.run_server(host="0.0.0.0", port=port, debug=False)  # Debug False para produção
