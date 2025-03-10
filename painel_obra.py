@@ -1,21 +1,24 @@
 import pandas as pd
 import dash
 from dash import dcc, html, dash_table
-from dash.dependencies import Input, Output
+from dash.dependencies import Input, Output, State
 import datetime
 import requests
 import json
 import os
 import subprocess
+from flask_caching import Cache
+import time
 
 # Instala as dependências caso não estejam instaladas
 try:
     import gspread
     from oauth2client.service_account import ServiceAccountCredentials
     from geopy.geocoders import Nominatim
+    import flask_caching
 except ModuleNotFoundError:
     print("📌 Instalando dependências...")
-    subprocess.check_call(["pip", "install", "gspread", "oauth2client", "geopy"])
+    subprocess.check_call(["pip", "install", "gspread", "oauth2client", "geopy", "flask-caching"])
     import gspread
     from oauth2client.service_account import ServiceAccountCredentials
     from geopy.geocoders import Nominatim
@@ -51,6 +54,24 @@ cores_disciplinas = {
 client = None
 creds = None
 
+# Criar o app Dash
+app = dash.Dash(__name__, suppress_callback_exceptions=True)
+server = app.server  # Necessário para deploy em serviços como Render
+
+# Configurar o cache
+cache = Cache(app.server, config={
+    'CACHE_TYPE': 'filesystem',
+    'CACHE_DIR': 'cache-directory',
+    'CACHE_DEFAULT_TIMEOUT': 300  # 5 minutos
+})
+
+# Variável para controle da última atualização dos dados
+ultima_atualizacao = 0
+dados_atuais = pd.DataFrame()
+coordenadas_cache = {}
+previsoes_cache = {}
+previsoes_timestamp = {}
+
 def inicializar_google_sheets():
     """Inicializa a conexão com o Google Sheets"""
     global client, creds
@@ -71,9 +92,15 @@ def inicializar_google_sheets():
         print(f"❌ Erro ao inicializar conexão com Google Sheets: {e}")
         return False
 
-def carregar_dados():
-    """Carrega os dados da planilha do Google Sheets"""
-    global client, creds
+@cache.memoize(timeout=300)  # Cache por 5 minutos
+def carregar_dados(force_refresh=False):
+    """Carrega os dados da planilha do Google Sheets com cache"""
+    global client, creds, ultima_atualizacao, dados_atuais
+    
+    # Verifica se precisamos atualizar ou se podemos usar os dados em memória
+    tempo_atual = time.time()
+    if not force_refresh and not dados_atuais.empty and (tempo_atual - ultima_atualizacao) < 300:
+        return dados_atuais
     
     try:
         # Verificar se o cliente já está inicializado
@@ -91,36 +118,75 @@ def carregar_dados():
         
         # Converter para DataFrame
         df = pd.DataFrame(dados)
+        
+        # Pré-processamento dos dados
+        if "Município" in df.columns and "UF" in df.columns:
+            # Pré-carrega as coordenadas para todos os municípios
+            for _, row in df.iterrows():
+                if pd.notna(row["Município"]) and pd.notna(row["UF"]):
+                    chave = f"{row['Município']}-{row['UF']}"
+                    if chave not in coordenadas_cache:
+                        coordenadas_cache[chave] = obter_coordenadas(row["Município"], row["UF"])
+                        time.sleep(0.1)  # Pequeno delay para não sobrecarregar o serviço de geocoding
+            
+            # Adiciona as coordenadas ao DataFrame
+            df["Latitude"] = df.apply(
+                lambda row: coordenadas_cache.get(f"{row['Município']}-{row['UF']}", None) 
+                if pd.notna(row["Município"]) and pd.notna(row["UF"]) else None, 
+                axis=1
+            )
+        
+        # Atualiza as variáveis globais
+        dados_atuais = df
+        ultima_atualizacao = tempo_atual
+        
         print(f"✅ Dados carregados com sucesso! {len(df)} registros encontrados.")
         return df
     except gspread.exceptions.APIError as e:
         print(f"❌ Erro de API do Google Sheets: {e}")
         # Tentar renovar as credenciais
         if inicializar_google_sheets():
-            return carregar_dados()
+            return carregar_dados(force_refresh=True)
         return pd.DataFrame()
     except Exception as e:
         print(f"❌ Erro ao carregar dados do Google Sheets: {e}")
         return pd.DataFrame()
 
 def obter_previsao(municipios):
-    """Função para obter previsão do tempo"""
+    """Função para obter previsão do tempo com cache"""
+    global previsoes_cache, previsoes_timestamp
+    
     if not municipios:
         return {}
-        
+    
+    tempo_atual = time.time()
     previsoes = {}
+    municipios_consultar = []
+    
+    # Verifica quais cidades precisam ser atualizadas
     for cidade in municipios:
+        # Se a cidade estiver no cache e a previsão for recente (menos de 30 minutos)
+        if cidade in previsoes_cache and (tempo_atual - previsoes_timestamp.get(cidade, 0)) < 1800:
+            previsoes[cidade] = previsoes_cache[cidade]
+        else:
+            municipios_consultar.append(cidade)
+    
+    # Consulta a API apenas para cidades que precisam ser atualizadas
+    for cidade in municipios_consultar:
         try:
             url = f"{BASE_URL}?q={cidade}&appid={API_KEY}&lang=pt_br&units=metric"
             response = requests.get(url, timeout=10)
 
             if response.status_code == 200:
                 dados = response.json()
-                previsoes[cidade] = {
+                previsao = {
                     "Temperatura": f"{dados['main']['temp']:.1f}°C",
                     "Condição": dados['weather'][0]['description'].capitalize(),
                     "Umidade": f"{dados['main']['humidity']}%"
                 }
+                previsoes[cidade] = previsao
+                previsoes_cache[cidade] = previsao
+                previsoes_timestamp[cidade] = tempo_atual
             else:
                 previsoes[cidade] = {"Erro": f"Não foi possível obter a previsão para {cidade}."}
         except Exception as e:
@@ -138,20 +204,25 @@ def semana_atual():
     return f"Semana {semana} - {segunda.strftime('%d/%m/%Y')} até {sabado.strftime('%d/%m/%Y')}"
 
 def obter_coordenadas(municipio, uf):
-    """Obtém as coordenadas geográficas do município e estado."""
+    """Obtém as coordenadas geográficas do município e estado com cache."""
+    chave = f"{municipio}-{uf}"
+    
+    # Se já temos as coordenadas no cache, retorna diretamente
+    if chave in coordenadas_cache:
+        return coordenadas_cache[chave]
+    
     try:
         geolocator = Nominatim(user_agent="painel_obra")
         localizacao = geolocator.geocode(f"{municipio}, {uf}, Brasil", timeout=10)
         if localizacao:
+            coordenadas_cache[chave] = localizacao.latitude
             return localizacao.latitude
+        coordenadas_cache[chave] = None
         return None
     except Exception as e:
         print(f"Erro ao obter coordenadas para {municipio}, {uf}: {e}")
+        coordenadas_cache[chave] = None
         return None
-
-# Criando o app Dash
-app = dash.Dash(__name__, suppress_callback_exceptions=True)
-server = app.server  # Necessário para deploy em serviços como Render
 
 # Inicializa a conexão com o Google Sheets
 inicializar_google_sheets()
@@ -198,30 +269,39 @@ def layout():
                 style={"textAlign": "center", "color": "#666", 
                        "fontSize": "24px", "marginBottom": "20px"}),
         
-        # Seção de filtros
+        # Seção de filtros e botão de atualização
         html.Div([
             dcc.Dropdown(
                 id="filtro_disciplina",
                 options=[{"label": d, "value": d} for d in df["Disciplina"].dropna().unique()],
                 placeholder="Filtrar por disciplina",
                 multi=True,
-                style={"width": "30%"}
+                style={"width": "25%"}
             ),
             dcc.Dropdown(
                 id="filtro_local",
                 options=[{"label": l, "value": l} for l in df["Local Atual"].dropna().unique()],
                 placeholder="Filtrar por local",
                 multi=True,
-                style={"width": "30%"}
+                style={"width": "25%"}
             ),
             dcc.Dropdown(
                 id="filtro_empreiteira",
                 options=[{"label": e, "value": e} for e in df["Empreiteira"].dropna().unique()],
                 placeholder="Filtrar por empreiteira",
                 multi=True,
-                style={"width": "30%"}
-            )
+                style={"width": "25%"}
+            ),
+            html.Button("Atualizar Dados", id="btn-update", 
+                      style={"width": "15%", "backgroundColor": "#4CAF50", "color": "white", 
+                             "padding": "10px", "border": "none", "borderRadius": "5px"})
         ], style={"display": "flex", "gap": "10px", "justifyContent": "center", "marginBottom": "20px"}),
+        
+        # Indicador de última atualização
+        html.Div(id="status-atualizacao", style={"textAlign": "center", "marginBottom": "10px"}),
+        
+        # Armazenamento dos dados filtrados para evitar recarregamento
+        dcc.Store(id="store-dados-filtrados"),
         
         # Quadro visual dos canteiros
         html.Div(id="quadro_canteiros", 
@@ -237,9 +317,10 @@ def layout():
 
 @app.callback(
     Output("widget_previsao", "children"),
-    [Input("filtro_municipios", "value")]
+    [Input("filtro_municipios", "value"),
+     Input("interval-component", "n_intervals")]
 )
-def atualizar_previsao(municipios_selecionados):
+def atualizar_previsao(municipios_selecionados, n_intervals):
     """Callback para atualizar widget de previsão do tempo"""
     if not municipios_selecionados:
         return html.Div("Selecione municípios para ver a previsão", 
@@ -260,19 +341,30 @@ def atualizar_previsao(municipios_selecionados):
     ])
 
 @app.callback(
-    Output("quadro_canteiros", "children"),
+    [Output("store-dados-filtrados", "data"),
+     Output("status-atualizacao", "children")],
     [Input("filtro_disciplina", "value"), 
      Input("filtro_local", "value"), 
      Input("filtro_empreiteira", "value"),
+     Input("btn-update", "n_clicks"),
      Input("interval-component", "n_intervals")]
 )
-def atualizar_quadro(filtro_disciplina, filtro_local, filtro_empreiteira, n_intervals):
-    """Callback para atualizar o quadro de canteiros"""
-    df_filtrado = carregar_dados()
+def filtrar_dados(filtro_disciplina, filtro_local, filtro_empreiteira, n_clicks, n_intervals):
+    """Callback para filtrar os dados e armazenar no dcc.Store"""
+    # Forçar atualização apenas se o botão foi clicado
+    ctx = dash.callback_context
+    button_clicked = False
+    if ctx.triggered:
+        input_id = ctx.triggered[0]['prop_id'].split('.')[0]
+        if input_id == "btn-update":
+            button_clicked = True
+    
+    df_filtrado = carregar_dados(force_refresh=button_clicked)
     
     if df_filtrado.empty:
-        return html.Div("Erro ao carregar dados", style={"color": "red"})
+        return {}, html.Div("Erro ao carregar dados", style={"color": "red"})
     
+    # Aplica os filtros
     if filtro_disciplina:
         df_filtrado = df_filtrado[df_filtrado["Disciplina"].isin(filtro_disciplina)]
     if filtro_local:
@@ -280,31 +372,62 @@ def atualizar_quadro(filtro_disciplina, filtro_local, filtro_empreiteira, n_inte
     if filtro_empreiteira:
         df_filtrado = df_filtrado[df_filtrado["Empreiteira"].isin(filtro_empreiteira)]
     
-    # Obter coordenadas dos municípios e ordenar de Norte para Sul
-    # Verificar se já existem as colunas Município e UF
-    if "Município" in df_filtrado.columns and "UF" in df_filtrado.columns:
-        df_filtrado["Latitude"] = df_filtrado.apply(
-            lambda row: obter_coordenadas(row["Município"], row["UF"]) 
-            if pd.notna(row["Município"]) and pd.notna(row["UF"]) else None, 
-            axis=1
-        )
-        # Ordenamos apenas os valores que possuem latitude
-        if df_filtrado["Latitude"].notna().any():
-            df_com_lat = df_filtrado[df_filtrado["Latitude"].notna()].sort_values(by="Latitude", ascending=False)
-            df_sem_lat = df_filtrado[df_filtrado["Latitude"].isna()]
-            df_filtrado = pd.concat([df_com_lat, df_sem_lat])
+    # Ordenar por latitude quando disponível
+    if "Latitude" in df_filtrado.columns and df_filtrado["Latitude"].notna().any():
+        df_com_lat = df_filtrado[df_filtrado["Latitude"].notna()].sort_values(by="Latitude", ascending=False)
+        df_sem_lat = df_filtrado[df_filtrado["Latitude"].isna()]
+        df_filtrado = pd.concat([df_com_lat, df_sem_lat])
     
-    canteiros = df_filtrado["Local Atual"].unique()
-    cards = []
-    
-    for canteiro in canteiros:
+    # Preparar os dados para o armazenamento
+    dados_canteiros = []
+    for canteiro in df_filtrado["Local Atual"].unique():
         df_canteiro = df_filtrado[df_filtrado["Local Atual"] == canteiro]
         
         # Verificar se há registros para este canteiro
         if df_canteiro.empty:
             continue
-            
+        
         empreiteira = df_canteiro["Empreiteira"].iloc[0] if not df_canteiro["Empreiteira"].isna().all() else "Folga"
+        
+        colaboradores = []
+        for _, row in df_canteiro.iterrows():
+            if pd.notna(row['Nome']) and pd.notna(row['Disciplina']):
+                colaboradores.append({
+                    "nome": row['Nome'],
+                    "disciplina": row['Disciplina']
+                })
+        
+        dados_canteiros.append({
+            "canteiro": canteiro,
+            "empreiteira": empreiteira,
+            "colaboradores": colaboradores
+        })
+    
+    # Formatando a mensagem de última atualização
+    ultima_att = datetime.datetime.fromtimestamp(ultima_atualizacao).strftime('%d/%m/%Y %H:%M:%S')
+    status = html.Div([
+        html.Span("Última atualização: ", style={"fontWeight": "bold"}),
+        html.Span(ultima_att),
+        html.Span(" • ", style={"margin": "0 5px"}),
+        html.Span(f"{len(dados_canteiros)} canteiros encontrados")
+    ])
+    
+    return {"canteiros": dados_canteiros}, status
+
+@app.callback(
+    Output("quadro_canteiros", "children"),
+    [Input("store-dados-filtrados", "data")]
+)
+def atualizar_quadro(dados):
+    """Callback para atualizar o quadro de canteiros usando os dados filtrados armazenados"""
+    if not dados or "canteiros" not in dados:
+        return html.Div("Sem dados para exibir")
+    
+    cards = []
+    
+    for canteiro_data in dados["canteiros"]:
+        canteiro = canteiro_data["canteiro"]
+        empreiteira = canteiro_data["empreiteira"]
         cor_canteiro = cores_canteiros.get(empreiteira, "#d3d3d3")
         
         background_style = {
@@ -338,10 +461,10 @@ def atualizar_quadro(filtro_disciplina, filtro_local, filtro_empreiteira, n_inte
         
         colaboradores_html = html.Ul([
             html.Li(
-                f"{row['Nome']} - {row['Disciplina']}",
+                f"{colaborador['nome']} - {colaborador['disciplina']}",
                 style={
-                    "backgroundColor": cores_disciplinas.get(row['Disciplina'], "#ddd"),
-                    "color": "#000" if row['Disciplina'] in ["Saúde", "Qualidade", "Folga"] else "#fff",
+                    "backgroundColor": cores_disciplinas.get(colaborador['disciplina'], "#ddd"),
+                    "color": "#000" if colaborador['disciplina'] in ["Saúde", "Qualidade", "Folga"] else "#fff",
                     "fontWeight": "bold",
                     "padding": "8px",
                     "borderRadius": "8px",
@@ -350,7 +473,7 @@ def atualizar_quadro(filtro_disciplina, filtro_local, filtro_empreiteira, n_inte
                     "marginBottom": "5px",
                     "listStyleType": "none"
                 }
-            ) for _, row in df_canteiro.iterrows() if pd.notna(row['Nome']) and pd.notna(row['Disciplina'])
+            ) for colaborador in canteiro_data["colaboradores"]
         ], style={"padding": "0", "margin": "0"})
         
         cards.append(html.Div([
@@ -369,6 +492,7 @@ def reload_data(n_clicks):
     """Callback para recarregar os dados quando o botão for clicado"""
     if n_clicks:
         inicializar_google_sheets()
+        carregar_dados(force_refresh=True)
         return "Dados recarregados"
     return "Tentar novamente"
 
