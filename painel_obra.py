@@ -535,8 +535,9 @@ def atualizar_quadro(dados):
             nome_style = {
                 "backgroundColor": "rgba(255, 255, 255, 0.2)",
                 "color": "#000" if disciplina in ["Saúde", "Qualidade", "Folga", "Liderança"] else "#fff",
+                "fontWeight": "bold",
                 "padding": "8px 10px",  # Aumentado o padding
-                "fontSize": "18px",  # Aumentado o tamanho da fonte para nomes
+                "fontSize": "20px",  # Aumentado o tamanho da fonte para nomes
                 "fontFamily": "Orbitron, sans-serif",
                 "borderBottom": "1px solid rgba(255, 255, 255, 0.1)",
                 "listStyleType": "none"
