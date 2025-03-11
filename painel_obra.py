@@ -41,14 +41,15 @@ cores_canteiros = {
 }
 
 cores_disciplinas = {
-    "Produção - LT": "#ff0000",
+    "Produção - LT": "#800080",  # Alterado de #ff0000 (vermelho) para #800080 (roxo)
     "Produção - SE": "#ff8c00",
     "Segurança": "#008000",
     "Fornecimento": "#00008b",
     "Geologia": "#8b4513",
     "Saúde": "#f8f9fa",
     "Qualidade": "#add8e6",
-    "Liderança": "#ffff00"  # Adicionada a disciplina Liderança com a cor amarela
+    "Liderança": "#ffff00",
+    "Fundiário": "#ff0000"  # Nova disciplina Fundiário com a cor vermelha
 }
 
 # Inicialização de variáveis globais
