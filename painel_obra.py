@@ -242,22 +242,24 @@ def layout():
         ])
     
     return html.Div([
-        # CSS para configurar a resolução padrão para 1920x1080
-        html.Style("""
-            html, body {
-                width: 1920px;
-                height: 1080px;
-                margin: 0 auto;
-                overflow: auto;
-            }
-            @media screen and (max-width: 1919px) {
+        # CSS para configurar a resolução padrão para 1920x1080 usando um tag style no head
+        html.Head([
+            html.Style('''
                 html, body {
-                    transform-origin: top left;
-                    transform: scale(calc(100vw / 1920));
-                    height: calc(1080px * (100vw / 1920));
+                    width: 1920px;
+                    height: 1080px;
+                    margin: 0 auto;
+                    overflow: auto;
                 }
-            }
-        """),
+                @media screen and (max-width: 1919px) {
+                    html, body {
+                        transform-origin: top left;
+                        transform: scale(calc(100vw / 1920));
+                        height: calc(1080px * (100vw / 1920));
+                    }
+                }
+            ''')
+        ]),
         
         # Widget de previsão do tempo
         html.Div([
