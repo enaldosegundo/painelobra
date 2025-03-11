@@ -52,6 +52,19 @@ cores_disciplinas = {
     "Fundiário": "#ff0000"  # Nova disciplina Fundiário com a cor vermelha
 }
 
+# Definir a ordem prioritária das disciplinas
+ordem_disciplinas = [
+    "Liderança", 
+    "Produção - LT", 
+    "Produção - SE", 
+    "Fundiário", 
+    "Segurança", 
+    "Qualidade", 
+    "Saúde", 
+    "Fornecimento", 
+    "Geologia"
+]
+
 # Inicialização de variáveis globais
 client = None
 creds = None
@@ -391,18 +404,45 @@ def filtrar_dados(filtro_disciplina, filtro_local, filtro_empreiteira, n_clicks,
         
         empreiteira = df_canteiro["Empreiteira"].iloc[0] if not df_canteiro["Empreiteira"].isna().all() else "Folga"
         
-        colaboradores = []
+        # Agrupar colaboradores por disciplina
+        disciplinas_por_canteiro = {}
         for _, row in df_canteiro.iterrows():
             if pd.notna(row['Nome']) and pd.notna(row['Disciplina']):
-                colaboradores.append({
-                    "nome": row['Nome'],
-                    "disciplina": row['Disciplina']
+                disciplina = row['Disciplina']
+                if disciplina not in disciplinas_por_canteiro:
+                    disciplinas_por_canteiro[disciplina] = []
+                
+                disciplinas_por_canteiro[disciplina].append(row['Nome'])
+        
+        # Converter para o formato esperado
+        colaboradores_agrupados = []
+        
+        # Ordenar as disciplinas conforme a ordem definida
+        disciplinas_ordenadas = []
+        
+        # Primeiro adicionar as disciplinas na ordem prioritária
+        for disc in ordem_disciplinas:
+            if disc in disciplinas_por_canteiro:
+                disciplinas_ordenadas.append(disc)
+        
+        # Depois adicionar quaisquer outras disciplinas que não estejam na lista prioritária
+        for disc in disciplinas_por_canteiro:
+            if disc not in disciplinas_ordenadas:
+                disciplinas_ordenadas.append(disc)
+        
+        # Criar a lista final de colaboradores agrupados por disciplina
+        for disciplina in disciplinas_ordenadas:
+            for nome in sorted(disciplinas_por_canteiro[disciplina]):  # Ordenar nomes alfabeticamente dentro de cada disciplina
+                colaboradores_agrupados.append({
+                    "nome": nome,
+                    "disciplina": disciplina
                 })
         
         dados_canteiros.append({
             "canteiro": canteiro,
             "empreiteira": empreiteira,
-            "colaboradores": colaboradores
+            "colaboradores": colaboradores_agrupados,
+            "disciplinas": disciplinas_ordenadas  # Adicionando a lista de disciplinas para uso no display
         })
     
     # Formatando a mensagem de última atualização
@@ -431,6 +471,7 @@ def atualizar_quadro(dados):
         canteiro = canteiro_data["canteiro"]
         empreiteira = canteiro_data["empreiteira"]
         cor_canteiro = cores_canteiros.get(empreiteira, "#d3d3d3")
+        disciplinas = canteiro_data.get("disciplinas", [])
         
         background_style = {
             "backgroundColor": cor_canteiro,
@@ -461,27 +502,60 @@ def atualizar_quadro(dados):
             "marginBottom": "15px"
         }
         
-        colaboradores_html = html.Ul([
-            html.Li(
-                f"{colaborador['nome']} - {colaborador['disciplina']}",
-                style={
-                    "backgroundColor": cores_disciplinas.get(colaborador['disciplina'], "#ddd"),
-                    "color": "#000" if colaborador['disciplina'] in ["Saúde", "Qualidade", "Folga", "Liderança"] else "#fff",
-                    "fontWeight": "bold",
-                    "padding": "8px",
-                    "borderRadius": "8px",
-                    "fontSize": "20px",
-                    "fontFamily": "Orbitron, sans-serif",
-                    "marginBottom": "5px",
-                    "listStyleType": "none"
-                }
-            ) for colaborador in canteiro_data["colaboradores"]
-        ], style={"padding": "0", "margin": "0"})
+        # Agrupar e mostrar colaboradores por disciplina
+        seccoes_disciplina = []
+        
+        for disciplina in disciplinas:
+            colaboradores_disciplina = [c for c in canteiro_data["colaboradores"] if c["disciplina"] == disciplina]
+            
+            # Estilo do cabeçalho da disciplina
+            disciplina_header_style = {
+                "backgroundColor": cores_disciplinas.get(disciplina, "#ddd"),
+                "color": "#000" if disciplina in ["Saúde", "Qualidade", "Folga", "Liderança"] else "#fff",
+                "fontWeight": "bold",
+                "padding": "8px",
+                "borderRadius": "8px 8px 0 0",
+                "fontSize": "18px",
+                "fontFamily": "Orbitron, sans-serif",
+                "marginTop": "10px",
+                "marginBottom": "0"
+            }
+            
+            # Estilo dos nomes na disciplina
+            nome_style = {
+                "backgroundColor": "rgba(255, 255, 255, 0.2)",
+                "color": "#000" if disciplina in ["Saúde", "Qualidade", "Folga", "Liderança"] else "#fff",
+                "padding": "6px 8px",
+                "fontSize": "16px",
+                "fontFamily": "Orbitron, sans-serif",
+                "borderBottom": "1px solid rgba(255, 255, 255, 0.1)",
+                "listStyleType": "none"
+            }
+            
+            # Último item com borda arredondada na parte inferior
+            ultimo_nome_style = dict(nome_style)
+            ultimo_nome_style["borderRadius"] = "0 0 8px 8px"
+            ultimo_nome_style["borderBottom"] = "none"
+            
+            # Criar lista de nomes para esta disciplina
+            nomes_lista = []
+            for i, colab in enumerate(colaboradores_disciplina):
+                estilo = ultimo_nome_style if i == len(colaboradores_disciplina) - 1 else nome_style
+                nomes_lista.append(html.Li(colab["nome"], style=estilo))
+            
+            # Adicionar seção de disciplina se houver colaboradores
+            if nomes_lista:
+                seccoes_disciplina.append(
+                    html.Div([
+                        html.H4(disciplina, style=disciplina_header_style),
+                        html.Ul(nomes_lista, style={"padding": "0", "margin": "0"})
+                    ])
+                )
         
         cards.append(html.Div([
             html.H3(f"{canteiro}" if empreiteira == "Folga" else f"{canteiro} - {empreiteira}", 
                    style=titulo_style),
-            colaboradores_html
+            html.Div(seccoes_disciplina)
         ], style=background_style))
     
     return cards
