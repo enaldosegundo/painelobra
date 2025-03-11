@@ -48,7 +48,7 @@ cores_disciplinas = {
     "Geologia": "#8b4513",
     "Saúde": "#f8f9fa",
     "Qualidade": "#add8e6",
-    "Liderança": "#ffff00"  # Adicionada nova disciplina com cor amarela
+    "Liderança": "#ffff00"  # Adicionada a disciplina Liderança com a cor amarela
 }
 
 # Inicialização de variáveis globais
@@ -242,25 +242,6 @@ def layout():
         ])
     
     return html.Div([
-        # CSS para configurar a resolução padrão para 1920x1080 usando um tag style no head
-        html.Head([
-            html.Style('''
-                html, body {
-                    width: 1920px;
-                    height: 1080px;
-                    margin: 0 auto;
-                    overflow: auto;
-                }
-                @media screen and (max-width: 1919px) {
-                    html, body {
-                        transform-origin: top left;
-                        transform: scale(calc(100vw / 1920));
-                        height: calc(1080px * (100vw / 1920));
-                    }
-                }
-            ''')
-        ]),
-        
         # Widget de previsão do tempo
         html.Div([
             dcc.Dropdown(
@@ -323,17 +304,9 @@ def layout():
         # Armazenamento dos dados filtrados para evitar recarregamento
         dcc.Store(id="store-dados-filtrados"),
         
-        # Quadro visual dos canteiros - ajustado para layouts maiores
+        # Quadro visual dos canteiros
         html.Div(id="quadro_canteiros", 
-                 style={
-                     "display": "flex", 
-                     "gap": "20px", 
-                     "justifyContent": "center", 
-                     "flexWrap": "wrap", 
-                     "padding": "20px",
-                     "maxWidth": "1880px",
-                     "margin": "0 auto"
-                 }),
+                 style={"display": "flex", "gap": "20px", "justifyContent": "center", "flexWrap": "wrap", "padding": "20px"}),
         
         # Interval para atualização automática dos dados (a cada 5 minutos)
         dcc.Interval(
