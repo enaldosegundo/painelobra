@@ -320,7 +320,7 @@ def layout():
         
         # Quadro visual dos canteiros
         html.Div(id="quadro_canteiros", 
-                 style={"display": "flex", "gap": "20px", "justifyContent": "center", "flexWrap": "wrap", "padding": "20px"}),
+                 style={"padding": "20px", "display": "flex", "flexWrap": "wrap", "justifyContent": "center"}),
         
         # Interval para atualização automática dos dados (a cada 5 minutos)
         dcc.Interval(
@@ -438,11 +438,15 @@ def filtrar_dados(filtro_disciplina, filtro_local, filtro_empreiteira, n_clicks,
                     "disciplina": disciplina
                 })
         
+        # Calcular o número total de colaboradores (para determinar se o card deve ser dividido)
+        total_colaboradores = len(colaboradores_agrupados)
+        
         dados_canteiros.append({
             "canteiro": canteiro,
             "empreiteira": empreiteira,
             "colaboradores": colaboradores_agrupados,
-            "disciplinas": disciplinas_ordenadas  # Adicionando a lista de disciplinas para uso no display
+            "disciplinas": disciplinas_ordenadas,  # Adicionando a lista de disciplinas para uso no display
+            "total_colaboradores": total_colaboradores  # Adicionando o número total de colaboradores
         })
     
     # Formatando a mensagem de última atualização
@@ -472,16 +476,22 @@ def atualizar_quadro(dados):
         empreiteira = canteiro_data["empreiteira"]
         cor_canteiro = cores_canteiros.get(empreiteira, "#d3d3d3")
         disciplinas = canteiro_data.get("disciplinas", [])
+        total_colaboradores = canteiro_data.get("total_colaboradores", 0)
         
+        # Verificar se o card precisa ser dividido em duas colunas (quando tem muitos colaboradores)
+        duas_colunas = total_colaboradores > 8
+        
+        # Estilo base do card
         background_style = {
             "backgroundColor": cor_canteiro,
             "padding": "20px",
             "borderRadius": "12px",
             "color": "#fff",
-            "width": "320px",
+            "width": "320px" if not duas_colunas else "600px",
             "position": "relative",
             "minHeight": "200px",
-            "boxShadow": "0 4px 6px rgba(0, 0, 0, 0.1)"
+            "boxShadow": "0 4px 6px rgba(0, 0, 0, 0.1)",
+            "margin": "10px"
         }
         
         if empreiteira == "Folga":
@@ -515,7 +525,7 @@ def atualizar_quadro(dados):
                 "fontWeight": "bold",
                 "padding": "8px",
                 "borderRadius": "8px 8px 0 0",
-                "fontSize": "18px",
+                "fontSize": "22px",  # Aumentado o tamanho da fonte para disciplinas
                 "fontFamily": "Orbitron, sans-serif",
                 "marginTop": "10px",
                 "marginBottom": "0"
@@ -525,8 +535,8 @@ def atualizar_quadro(dados):
             nome_style = {
                 "backgroundColor": "rgba(255, 255, 255, 0.2)",
                 "color": "#000" if disciplina in ["Saúde", "Qualidade", "Folga", "Liderança"] else "#fff",
-                "padding": "6px 8px",
-                "fontSize": "16px",
+                "padding": "8px 10px",  # Aumentado o padding
+                "fontSize": "18px",  # Aumentado o tamanho da fonte para nomes
                 "fontFamily": "Orbitron, sans-serif",
                 "borderBottom": "1px solid rgba(255, 255, 255, 0.1)",
                 "listStyleType": "none"
@@ -552,10 +562,26 @@ def atualizar_quadro(dados):
                     ])
                 )
         
+        # Se for para exibir em duas colunas, dividir as seções de disciplina
+        if duas_colunas:
+            # Calcular o ponto médio para divisão das seções
+            meio = len(seccoes_disciplina) // 2
+            coluna1 = seccoes_disciplina[:meio]
+            coluna2 = seccoes_disciplina[meio:]
+            
+            # Criar o layout de duas colunas
+            conteudo = html.Div([
+                html.Div(coluna1, style={"width": "48%", "float": "left"}),
+                html.Div(coluna2, style={"width": "48%", "float": "right"})
+            ], style={"display": "flex", "justifyContent": "space-between"})
+        else:
+            conteudo = html.Div(seccoes_disciplina)
+        
+        # Criar o card completo
         cards.append(html.Div([
             html.H3(f"{canteiro}" if empreiteira == "Folga" else f"{canteiro} - {empreiteira}", 
                    style=titulo_style),
-            html.Div(seccoes_disciplina)
+            conteudo
         ], style=background_style))
     
     return cards
